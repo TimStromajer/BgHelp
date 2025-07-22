@@ -23,6 +23,6 @@
 	},
 	"dependencies": {
 		"@google/genai": "^1.10.0",
-		"fs": "^0.0.1-security"
+		"fs-extra": "^11.3.0"
 	}
 }

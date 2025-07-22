@@ -1,7 +1,7 @@
 import { GoogleGenAI, type GoogleGenAIOptions, createUserContent, createPartFromUri } from "@google/genai";
 import { GEMINI_API_KEY } from '$env/static/private';
 import { json } from '@sveltejs/kit';
-import { promises as fs } from 'fs';
+import { promises as fs } from "fs";
 
 let options: GoogleGenAIOptions = {
   apiKey: GEMINI_API_KEY,
