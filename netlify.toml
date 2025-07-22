@@ -1,0 +1,4 @@
+[build]
+  publish = "dist/BgHelp"
+[functions]
+  node_bundler = "esbuild"
