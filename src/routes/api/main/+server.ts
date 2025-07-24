@@ -31,7 +31,8 @@ export async function POST({ request }) {
     await fs.writeFile('./recording.webm', buffer);
   } catch (error) {
     console.error('Error saving audio file:', error);
-    return new Response('Error processing audio file', { status: 500 });
+    // send error text in response
+    return new Response('Error processing audio file' + error, { status: 500 });
   }
   
   // Upload to your ai.files endpoint
