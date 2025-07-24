@@ -10,6 +10,7 @@ let options: GoogleGenAIOptions = {
 const ai = new GoogleGenAI(options);
 
 export async function POST({ request }) {
+  console.log('Received POST request for audio processing');
   const form = await request.formData();
   const file = form.get('audio');
   if (!(file instanceof Blob || file instanceof File)) {
