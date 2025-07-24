@@ -17,12 +17,23 @@ export async function POST({ request }) {
     return new Response('No audio file received', { status: 400 });
   }
 
-  // Optional: convert Blob to Buffer or upload straight
-  const buffer = Buffer.from(await file.arrayBuffer());
+  let buffer;
+  try {
+    // Optional: convert Blob to Buffer or upload straight
+    buffer = Buffer.from(await file.arrayBuffer());
+  } catch (error) {
+    console.error('Error processing audio file:', error);
+    return new Response('Error processing audio file', { status: 500 });
+  }
 
   // Example: save the file temporarily
-  await fs.writeFile('./recording.webm', buffer);
-
+  try {
+    await fs.writeFile('./recording.webm', buffer);
+  } catch (error) {
+    console.error('Error saving audio file:', error);
+    return new Response('Error processing audio file', { status: 500 });
+  }
+  
   // Upload to your ai.files endpoint
   const myfile = await ai.files.upload({
     file: './recording.webm',
