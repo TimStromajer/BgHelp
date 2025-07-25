@@ -2,7 +2,6 @@
     import { onMount } from 'svelte';
 
     let isListening = false;
-    let recognition;
     let audioChunks = [];
     let mediaRecorder;
     let userText = '';
@@ -96,64 +95,6 @@
 
     onMount(() => {
         if ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) {
-            recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-            recognition.continuous = true;
-            recognition.interimResults = false;
-            recognition.lang = 'en-US';
-
-            recognition.onstart = () => {
-                console.log('Voice recognition started');
-                isListening = true;
-                errorMessage = '';
-                userText = ''; // Clear previous text when starting
-                apiResponse = ''; // Clear previous response
-                transcribedTextFromBackend = ''; // Clear backend transcription
-            };
-
-            recognition.onresult = (event) => {
-                // This gives real-time feedback from the browser's STT
-                // const transcript = event.results[0][0].transcript;
-                // userText = transcript; // Show what the browser thinks it hears
-                // console.log('Browser preliminary transcript:', userText);
-            };
-
-            recognition.onerror = (event) => {
-                console.error('Speech recognition error:', event.error);
-                errorMessage = `Speech recognition error: ${event.error}. Please try again.`;
-                isListening = false; // Set to false to allow user to try again
-                // Immediately stop recording if there's an error
-                if (mediaRecorder && mediaRecorder.state === 'recording') {
-                    mediaRecorder.stop();
-                }
-            };
-
-            recognition.onend = async () => {
-                console.log('Voice recognition ended');
-                isListening = false; // Set listening to false when it naturally ends
-
-                // Important: Ensure mediaRecorder is stopped before processing audioChunks
-                // This ensures all recorded data is available.
-                if (mediaRecorder && mediaRecorder.state === 'recording') {
-                    mediaRecorder.stop();
-                }
-
-                // Wait a tiny bit for mediaRecorder.onstop to finish pushing the last chunk
-                // This is a common pattern, though onstop usually fires synchronously enough.
-                await new Promise(resolve => setTimeout(resolve, 50));
-
-                if (audioChunks.length > 0) {
-                    console.log('Processing audio after recognition ended naturally or stopped by user...');
-                    isProcessingSpeech = false;
-                    await speechToText(new Blob(audioChunks, { type: 'audio/webm' }));
-                    audioChunks = []; // Clear chunks after processing
-                } else {
-                    console.log('No audio chunks recorded.');
-                    if (!errorMessage) { // Only set if no other error has occurred
-                        apiResponse = "No audio was recorded. Please ensure microphone is working and you spoke.";
-                    }
-                }
-            };
-
             navigator.mediaDevices.getUserMedia({ audio: true })
                 .then(stream => {
                     mediaRecorder = new MediaRecorder(stream);
@@ -165,13 +106,31 @@
                     mediaRecorder.onstop = () => {
                         console.log('MediaRecorder stopped. Total chunks:', audioChunks.length);
                         isProcessingSpeech = true; // Set processing state to true
-                        // The `recognition.onend` will now typically fire and handle
-                        // the `speechToText` call with the collected `audioChunks`.
+
+                        console.log('Voice recognition ended');
+                        isListening = false; // Set listening to false when it naturally ends
+
+                        if (audioChunks.length > 0) {
+                            console.log('Processing audio after recognition ended naturally or stopped by user...');
+                            isProcessingSpeech = false;
+                            speechToText(new Blob(audioChunks, { type: 'audio/webm' }));
+                            audioChunks = []; // Clear chunks after processing
+                            // The `recognition.onend` will now typically fire and handle
+                            // the `speechToText` call with the collected `audioChunks`.
+                        };
                     };
                     mediaRecorder.onerror = (event) => {
                         console.error('MediaRecorder error:', event.error);
                         errorMessage = `Audio recording error: ${event.error.name}.`;
                         isListening = false;
+                    };
+                    mediaRecorder.onstart = () => {
+                        console.log('MediaRecorder started');
+                        isListening = true; // Set listening to true when recording starts
+                        errorMessage = '';
+                        userText = ''; // Clear previous text when starting
+                        apiResponse = ''; // Clear previous response
+                        transcribedTextFromBackend = ''; // Clear backend transcription
                     };
                 })
                 .catch(err => {
@@ -189,9 +148,6 @@
         if (isListening) {
             // User explicitly presses to Stop listening
             console.log('User pressed stop button.');
-            if (recognition && recognition.listening) {
-                recognition.stop(); // This will trigger recognition.onend
-            }
             if (mediaRecorder && mediaRecorder.state === 'recording') {
                 mediaRecorder.stop(); // This will trigger mediaRecorder.onstop
             }
@@ -204,15 +160,6 @@
             errorMessage = '';
             transcribedTextFromBackend = '';
             audioChunks = [];
-
-            if (recognition) {
-                // To ensure a clean start, cancel any pending recognition
-                recognition.abort();
-                recognition.start();
-            } else {
-                errorMessage = "Speech recognition not initialized. Check browser support.";
-                return;
-            }
 
             if (mediaRecorder && mediaRecorder.state === 'inactive') {
                 mediaRecorder.start();
@@ -363,7 +310,7 @@
         on:click={toggleListening}
         class="listen-button"
         class:listening={isListening}
-        disabled={!recognition || !mediaRecorder || isLoadingSTT || isLoadingAPI}
+        disabled={ !mediaRecorder || isLoadingSTT || isLoadingAPI}
     >
         {#if isListening}
             Stop Listening
@@ -376,7 +323,7 @@
 
     {#if errorMessage}
         <p class="error-message">{errorMessage}</p>
-    {:else if !recognition || !mediaRecorder}
+    {:else if !mediaRecorder}
         <p class="status-message">Initializing microphone and speech recognition...</p>
     {/if}
 

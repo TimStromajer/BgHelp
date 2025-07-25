@@ -19,12 +19,14 @@ export async function POST({ request }) {
 
   const buffer = Buffer.from(await file.arrayBuffer());
 
+  let fileName = "/tmp/recording.webm"
+
   // Example: save the file temporarily
-  await fs.writeFile('/tmp/recording.webm', buffer);
+  await fs.writeFile(fileName, buffer);
 
   // Upload to your ai.files endpoint
   const myfile = await ai.files.upload({
-    file: '/tmp/recording.webm',
+    file: fileName,
     config: { mimeType: file.type }
   });
 
