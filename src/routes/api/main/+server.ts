@@ -61,6 +61,7 @@ export async function GET({ url }) {
   // Make the request
   const response = await ai.models.generateContent({
     model: 'gemini-2.5-flash',
+    config: config,
     contents: [
       {
         role: 'model',
