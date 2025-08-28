@@ -5,15 +5,16 @@ let ws = null;
 if (typeof window !== 'undefined') {
   fetch('/api/soniox').then(response => response.json()).then(data => {
     apiKey = data.key;
-    console.log("Fetched API key from server.");
+    //console.log("Fetched API key from server.");
   }).catch(error => {
     console.error("Error fetching API key from server:", error);
   });
 }
 
+let sonioxConntected = false;
 let finalText = "";
 let finalTextReady = false;
-const createWebSocket = () => {
+const createWebSocket = (msgReveiver) => {
   console.log("Creating WebSocket connection...");
   finalTextReady = false;
   finalText = "";
@@ -32,10 +33,14 @@ const createWebSocket = () => {
     );
   });
 
-
   // Listen for messages
   ws.addEventListener('message', function (event) {
     const res = JSON.parse(event.data);
+
+    if (!sonioxConntected) {
+      msgReveiver(JSON.stringify({ type: "sonioxConntected", text: "true" }))
+    }
+    sonioxConntected = true
 
     if (res.error_code) {
       console.log(`\nError: ${res.error_code} ${res.error_message}`);
@@ -54,16 +59,31 @@ const createWebSocket = () => {
       }
     }
 
-    console.log("FINAL TEXT: ", finalText);
-    console.log("NON-FINAL TEXT: ", nonFinalText);
+    //console.log("FINAL TEXT: ", finalText);
+    //console.log("NON-FINAL TEXT: ", nonFinalText);
 
     if (res.finished) {
       console.log("\nTranscription done.");
       finalTextReady = true;
     }
+
+    // Send non-final text to client
+    if (nonFinalText) {
+      msgReveiver(JSON.stringify({ type: "partial", text: finalText+nonFinalText }));
+    }
   });
 
-  ws.addEventListener("close", () => { console.log("WebSocket connection closed."); });
+  ws.addEventListener("close", () => {
+    console.log("WebSocket connection closed."); 
+    sonioxConntected = false; // Reset connection status
+
+    // Send final text to client
+    if (finalText) {
+      console.log("FINAL TEXT: ", finalText);
+      msgReveiver(JSON.stringify({ type: "final", text: finalText }));
+      finalText = ""; // Reset after sending
+    }
+  });
 
   ws.addEventListener("error", (error) => {
     console.error("Connection error occurred:", error);

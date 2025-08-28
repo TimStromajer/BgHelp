@@ -1,179 +1,182 @@
 <script>
-    import { onMount } from 'svelte';
+  import index from "$lib/index";
+  import { onMount } from "svelte";
 
-    let isListening = false;
-    let audioChunks = [];
-    let mediaRecorder;
-    let userText = '';
-    let apiResponse = '';
-    let errorMessage = '';
-    let isLoadingSTT = false; // New loading state for Speech-to-Text
-    let isLoadingAPI = false; // New loading state for the second API call (askQuestion)
-    let isProcessingSpeech = false; // New state to indicate processing of speech
+  let isRecording = $state(false);
+  let errorMessage = $state("");
+  let isListening = $state(false);
+  let mediaRecorder;
+  let outputText = $state(index.getFinalText());
+  let apiResponse = $state("");
+  let isLoadingAPI = $state(false);
+  let sonioxConntected = $state(false);
 
-    // This output variable is now mainly for the transcribed text that comes from the backend
-    // after the audio is sent.
-    // It will be the same as userText after successful transcription.
-    let transcribedTextFromBackend = '';
-
-    // Function to send audio to backend for Speech-to-Text
-    async function speechToText(blob) {
-        errorMessage = '';
-        isLoadingSTT = true;
-        userText = 'Transcribing audio...'; // Immediate feedback
-
-        try {
-            const form = new FormData();
-            form.append('audio', blob, 'recording.webm');
-
-            const res = await fetch('/api/main', {
-                method: 'POST',
-                body: form
-            });
-
-            if (!res.ok) {
-                const errorData = await res.json().catch(() => ({ message: res.statusText }));
-                throw new Error(`Server error ${res.status}: ${errorData.message || 'Unknown error'}`);
+  onMount(() => {
+    if ("SpeechRecognition" in window || "webkitSpeechRecognition" in window) {
+      navigator.mediaDevices
+        .getUserMedia({ audio: true })
+        .then((stream) => {
+          mediaRecorder = new MediaRecorder(stream);
+          mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+              if (index.getWSState() === WebSocket.OPEN) {
+                index.sendMessage(event.data);
+              }
             }
-
-            const data = await res.json();
-            // Assuming your /api/main POST endpoint returns { text: "transcribed text" }
-            transcribedTextFromBackend = data;
-            userText = transcribedTextFromBackend; // Update userText with the backend's transcription
-            console.log('Output from /api/main (STT):', transcribedTextFromBackend);
-
-            // Now, call the second API with the transcribed text
-            if (transcribedTextFromBackend) {
-                await askQuestion(transcribedTextFromBackend);
-            } else {
-                apiResponse = "No text was transcribed from your speech.";
-            }
-
-        } catch (error) {
-            console.error('Error in speechToText:', error);
-            errorMessage = `Failed to transcribe speech: ${error.message}`;
-            userText = 'Transcription failed.';
-        } finally {
-            isLoadingSTT = false;
-        }
+          };
+          mediaRecorder.onstop = () => {
+            console.log("Voice recognition ended");
+            index.sendMessage("");
+            isListening = false;
+          };
+          mediaRecorder.onerror = (event) => {
+            console.error("MediaRecorder error:", event.error);
+            errorMessage = `Audio recording error: ${event.error.name}.`;
+            isListening = false;
+          };
+          mediaRecorder.onstart = () => {
+            console.log("MediaRecorder started");
+            isListening = true;
+            errorMessage = "";
+          };
+        })
+        .catch((err) => {
+          console.error("Error accessing microphone:", err);
+          errorMessage =
+            "Error accessing microphone. Please allow access and reload the page.";
+        });
+    } else {
+      errorMessage = "Web Speech API is not supported in this browser. Please use Chrome.";
+      console.error(errorMessage);
     }
+  });
 
-    // Function to send transcribed text to backend for processing/answering
-    async function askQuestion(question) {
-        errorMessage = '';
-        isLoadingAPI = true;
-        apiResponse = 'Getting assistant response...'; // Immediate feedback
-
-        try {
-            // Ensure the question is not an object, but a string
-            let questionString = typeof question === 'object' && question !== null && question.text ? question.text : question;
-            if (typeof questionString !== 'string') {
-                throw new Error("Invalid question format provided to askQuestion. Expected string.");
-            }
-
-            const url = `/api/main?question=${encodeURIComponent(questionString)}`; // Use the same endpoint, but different method
-            const res = await fetch(url, { method: 'GET' });
-
-            if (!res.ok) {
-                const errorData = await res.json().catch(() => ({ message: res.statusText }));
-                throw new Error(`Error ${res.status}: ${errorData.message || 'Unknown error'}`);
-            }
-
-            const data = await res.json();
-            // Assuming your /api/main GET endpoint returns { message: "answer from assistant" }
-            apiResponse = data;
-            console.log('Answer from /api/main (question):', apiResponse);
-
-        } catch (error) {
-            console.error('Error in askQuestion:', error);
-            errorMessage = `Failed to get assistant response: ${error.message}`;
-            apiResponse = 'Failed to get assistant response.';
-        } finally {
-            isLoadingAPI = false;
-        }
+  function toggleRecording() {
+    if (isRecording) {
+      // User explicitly presses to Stop listening
+      console.log("User pressed stop button.");
+      //clearInterval(requestDataInterval);
+      if (mediaRecorder && mediaRecorder.state === "recording") {
+        mediaRecorder.stop(); // This will trigger mediaRecorder.onstop
+      }
+      isRecording = false; // Set immediately for UI feedback
+    } else {
+      // Start listening
+      console.log("User pressed start button.");
+      index.createWebSocket(msgReceiver);
+      errorMessage = "";
+      isRecording = true; // Set immediately for UI feedback
     }
+  }
 
-    onMount(() => {
-        if ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) {
-            navigator.mediaDevices.getUserMedia({ audio: true })
-                .then(stream => {
-                    mediaRecorder = new MediaRecorder(stream);
-                    mediaRecorder.ondataavailable = (event) => {
-                        if (event.data.size > 0) {
-                            console.log("DATA AVAILABLE FROM MediaRecorder");
-                            audioChunks.push(event.data);
-                        }
-                    };
-                    mediaRecorder.onstop = () => {
-                        console.log('MediaRecorder stopped. Total chunks:', audioChunks.length);
-                        isProcessingSpeech = true; // Set processing state to true
+  function msgReceiver(msg) {
+    const data = JSON.parse(msg);
+    if (data.type === "partial") {
+      outputText = data.text; // Update with non-final text
+    } else if (data.type === "final") {
+      console.log("Final text received:", data.text);
+      outputText = data.text; // Update with final text
+      askQuestion(outputText); // Send the final text to the backend
+    } else if (data.type === "sonioxConntected") {
+      console.log("Soniox connected:", data.text);
+      sonioxConntected = data.text === "true"; // Update connection status
 
-                        console.log('Voice recognition ended');
-                        isListening = false; // Set listening to false when it naturally ends
-
-                        if (audioChunks.length > 0) {
-                            console.log('Processing audio after recognition ended naturally or stopped by user...');
-                            isProcessingSpeech = false;
-                            speechToText(new Blob(audioChunks, { type: 'audio/webm' }));
-                            audioChunks = []; // Clear chunks after processing
-                            // The `recognition.onend` will now typically fire and handle
-                            // the `speechToText` call with the collected `audioChunks`.
-                        };
-                    };
-                    mediaRecorder.onerror = (event) => {
-                        console.error('MediaRecorder error:', event.error);
-                        errorMessage = `Audio recording error: ${event.error.name}.`;
-                        isListening = false;
-                    };
-                    mediaRecorder.onstart = () => {
-                        console.log('MediaRecorder started');
-                        isListening = true; // Set listening to true when recording starts
-                        errorMessage = '';
-                        userText = ''; // Clear previous text when starting
-                        apiResponse = ''; // Clear previous response
-                        transcribedTextFromBackend = ''; // Clear backend transcription
-                    };
-                })
-                .catch(err => {
-                    console.error('Error accessing microphone:', err);
-                    errorMessage = 'Error accessing microphone. Please allow access and reload the page.';
-                });
-
-        } else {
-            errorMessage = 'Web Speech API is not supported in this browser. Please use Chrome.';
-            console.error(errorMessage);
-        }
-    });
-
-    function toggleListening() {
-        if (isListening) {
-            // User explicitly presses to Stop listening
-            console.log('User pressed stop button.');
-            if (mediaRecorder && mediaRecorder.state === 'recording') {
-                mediaRecorder.stop(); // This will trigger mediaRecorder.onstop
-            }
-            isListening = false; // Set immediately for UI feedback
-        } else {
-            // Start listening
-            console.log('User pressed start button.');
-            userText = '';
-            apiResponse = '';
-            errorMessage = '';
-            transcribedTextFromBackend = '';
-            audioChunks = [];
-
-            if (mediaRecorder && mediaRecorder.state === 'inactive') {
-                mediaRecorder.start();
-            } else if (mediaRecorder && mediaRecorder.state === 'paused') {
-                mediaRecorder.resume();
-            } else if (!mediaRecorder) {
-                errorMessage = "Microphone not initialized. Please ensure access is granted.";
-            }
-
-            isListening = true; // Set immediately for UI feedback
-        }
+      if (mediaRecorder && mediaRecorder.state === "inactive") {
+        mediaRecorder.start(500);
+      }
     }
+  }
+
+  // Function to send transcribed text to backend for processing/answering
+  async function askQuestion(question) {
+    errorMessage = "";
+    isLoadingAPI = true;
+    apiResponse = "Getting assistant response..."; // Immediate feedback
+
+    try {
+      // Ensure the question is not an object, but a string
+      let questionString =
+        typeof question === "object" && question !== null && question.text
+          ? question.text
+          : question;
+      if (typeof questionString !== "string") {
+        throw new Error(
+          "Invalid question format provided to askQuestion. Expected string.",
+        );
+      }
+
+      const url = `/api/main?question=${encodeURIComponent(questionString)}`; // Use the same endpoint, but different method
+      const res = await fetch(url, { method: "GET" });
+
+      if (!res.ok) {
+        const errorData = await res
+          .json()
+          .catch(() => ({ message: res.statusText }));
+        throw new Error(
+          `Error ${res.status}: ${errorData.message || "Unknown error"}`,
+        );
+      }
+
+      const data = await res.json();
+      // Assuming your /api/main GET endpoint returns { message: "answer from assistant" }
+      apiResponse = data;
+      console.log("Answer from /api/main (question):", apiResponse);
+    } catch (error) {
+      console.error("Error in askQuestion:", error);
+      errorMessage = `Failed to get assistant response: ${error.message}`;
+      apiResponse = "Failed to get assistant response.";
+    } finally {
+      isLoadingAPI = false;
+    }
+  }
+
 </script>
+
+<div class="container">
+  <h1>Board Game Assistant</h1>
+
+  <button
+      onclick={toggleRecording}
+      class="listen-button"
+      class:listening={isListening}
+  >
+      {#if isListening}
+          Stop Listening
+      {:else if isLoadingAPI}
+          Processing...
+      {:else}
+          Start Listening
+      {/if}
+  </button>
+
+  {#if errorMessage}
+      <p class="error-message">{errorMessage}</p>
+  {/if}
+
+  {#if isListening && !errorMessage}
+      <p class="status-message">Listening... Speak clearly!</p>
+  {:else if isLoadingAPI}
+      <p class="status-message loading-indicator">Getting response from assistant...</p>
+  {/if}
+
+  {#if outputText}
+      <div class="section-content">
+          <h2 class="section-title">You Said:</h2>
+          <div class="user-text">
+              <p>{outputText}</p>
+          </div>
+      </div>
+  {/if}
+
+  {#if apiResponse}
+    <div class="section-content">
+      <h2 class="section-title">Assistant Says:</h2>
+      <div class="api-response">
+        <pre>{apiResponse}</pre>
+      </div>
+    </div>
+  {/if}
+</div>
 
 <style>
     :host {
@@ -298,62 +301,14 @@
         color: #155724;
     }
 
+    .api-response pre {
+      white-space: pre-wrap;
+      font-family: inherit;
+      margin: 0;
+    }
+
     .error-message {
         color: #dc3545;
         font-weight: bold;
     }
 </style>
-
-<div class="container">
-    <h1>Board Game Assistant</h1>
-
-    <button
-        on:click={toggleListening}
-        class="listen-button"
-        class:listening={isListening}
-        disabled={ !mediaRecorder || isLoadingSTT || isLoadingAPI}
-    >
-        {#if isListening}
-            Stop Listening
-        {:else if isLoadingSTT || isLoadingAPI}
-            Processing...
-        {:else}
-            Start Listening
-        {/if}
-    </button>
-
-    {#if errorMessage}
-        <p class="error-message">{errorMessage}</p>
-    {:else if !mediaRecorder}
-        <p class="status-message">Initializing microphone and speech recognition...</p>
-    {/if}
-
-    {#if isListening && !errorMessage}
-        <p class="status-message">Listening... Speak clearly!</p>
-    {:else if isProcessingSpeech}
-        <p class="status-message loading-indicator">Processing your speech...</p>
-    {:else if isLoadingSTT}
-        <p class="status-message loading-indicator">Transcribing your speech...</p>
-    {:else if isLoadingAPI}
-        <p class="status-message loading-indicator">Getting response from assistant...</p>
-    {/if}
-
-
-    {#if userText}
-        <div class="section-content">
-            <h2 class="section-title">You Said:</h2>
-            <div class="user-text">
-                <p>{userText}</p>
-            </div>
-        </div>
-    {/if}
-
-    {#if apiResponse}
-        <div class="section-content">
-            <h2 class="section-title">Assistant Says:</h2>
-            <div class="api-response">
-                <p>{apiResponse}</p>
-            </div>
-        </div>
-    {/if}
-</div>
