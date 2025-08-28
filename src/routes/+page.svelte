@@ -100,6 +100,7 @@
                     mediaRecorder = new MediaRecorder(stream);
                     mediaRecorder.ondataavailable = (event) => {
                         if (event.data.size > 0) {
+                            console.log("DATA AVAILABLE FROM MediaRecorder");
                             audioChunks.push(event.data);
                         }
                     };
